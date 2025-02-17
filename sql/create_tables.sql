@@ -13,5 +13,8 @@ CREATE TABLE IF NOT EXISTS partidos (
     jugador1_id INT REFERENCES jugadores(id),
     jugador2_id INT REFERENCES jugadores(id),
     resultado VARCHAR(10),
-    fecha DATE
+    fecha DATE,
+    ganador_id INT REFERENCES jugadores(id),
+    puntos_jugador1 INT,
+    puntos_jugador2 INT
 );
