@@ -12,7 +12,7 @@ class TenisMesaApp:
         self.label = tk.Label(root, text="Bienvenido al Club de Tenis de Mesa")
         self.label.pack()
 
-        self.add_player_button = tk.Button(root, text="Agregar Jugador", command=self.add_player)
+        self.add_player_button = tk.Button(root, text="Agregar Jugador", command=self.show_add_player_window)
         self.add_player_button.pack()
 
         self.record_match_button = tk.Button(root, text="Registrar Partido", command=self.record_match)
@@ -21,15 +21,40 @@ class TenisMesaApp:
         self.view_rankings_button = tk.Button(root, text="Ver Rankings", command=self.show_rankings)
         self.view_rankings_button.pack()
 
-    def add_player(self):
-        # Lógica para agregar un jugador
-        nombre = "Jugador Ejemplo"  # Puedes usar un cuadro de diálogo para ingresar el nombre
-        apellido = "Apellido Ejemplo"
+    def show_add_player_window(self):
+        # Crear una nueva ventana para agregar un jugador
+        add_player_window = tk.Toplevel(self.root)
+        add_player_window.title("Agregar Jugador")
+
+        # Campos para ingresar los datos del jugador
+        tk.Label(add_player_window, text="Nombre:").grid(row=0, column=0, padx=10, pady=10)
+        self.nombre_entry = tk.Entry(add_player_window)
+        self.nombre_entry.grid(row=0, column=1, padx=10, pady=10)
+
+        tk.Label(add_player_window, text="Apellido:").grid(row=1, column=0, padx=10, pady=10)
+        self.apellido_entry = tk.Entry(add_player_window)
+        self.apellido_entry.grid(row=1, column=1, padx=10, pady=10)
+
+
+        # Botón para agregar el jugador
+        tk.Button(add_player_window, text="Agregar", command=lambda: self.add_player(add_player_window)).grid(row=3, column=0, columnspan=2, pady=10)
+
+    def add_player(self, add_player_window):
+        # Obtener los datos del formulario
+        nombre = self.nombre_entry.get()
+        apellido = self.apellido_entry.get()
+
+        if not nombre or not apellido:
+            messagebox.showerror("Error", "Nombre y Apellido son obligatorios")
+            return
+
+        # Insertar el jugador en la base de datos
         self.db.execute_query(
             "INSERT INTO jugadores (nombre, apellido, ranking) VALUES (%s, %s, %s)",
             (nombre, apellido, 1000)  # Ranking inicial de 1000
         )
         messagebox.showinfo("Éxito", "Jugador agregado correctamente")
+        add_player_window.destroy()
 
     def record_match(self):
         # Crear una nueva ventana para registrar partidos
@@ -73,9 +98,9 @@ class TenisMesaApp:
         jugador2_name, jugador2_lastname = jugador2.split(" ")
 
         jugador1_id = self.db.fetch_all(
-            f"SELECT id FROM jugadores WHERE nombre = {jugador1_name} and apellido = {jugador1_lastname}")
+            f"SELECT id FROM jugadores WHERE nombre = '{jugador1_name}' and apellido = '{jugador1_lastname}'")[0]
         jugador2_id = self.db.fetch_all(
-            f"SELECT id FROM jugadores WHERE nombre = {jugador2_name} and apellido = {jugador2_lastname}")
+            f"SELECT id FROM jugadores WHERE nombre = '{jugador2_name}' and apellido = '{jugador2_lastname}'")[0]
 
         # Obtener los rankings actuales de los jugadores
         jugador1_ranking = self.db.fetch_all("SELECT ranking FROM jugadores WHERE id = %s", (jugador1_id,))[0][0]
