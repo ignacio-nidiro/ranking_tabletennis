@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import ttk, messagebox
 from database import Database
 
 class TenisMesaApp:
@@ -18,7 +18,7 @@ class TenisMesaApp:
         self.record_match_button = tk.Button(root, text="Registrar Partido", command=self.record_match)
         self.record_match_button.pack()
 
-        self.view_rankings_button = tk.Button(root, text="Ver Rankings", command=self.view_rankings)
+        self.view_rankings_button = tk.Button(root, text="Ver Rankings", command=self.show_rankings)
         self.view_rankings_button.pack()
 
     def add_player(self):
@@ -32,17 +32,57 @@ class TenisMesaApp:
         messagebox.showinfo("Éxito", "Jugador agregado correctamente")
 
     def record_match(self):
-        # Lógica para registrar un partido
-        jugador1_id = simpledialog.askinteger("Registrar Partido", "ID del Jugador 1:")
-        jugador2_id = simpledialog.askinteger("Registrar Partido", "ID del Jugador 2:")
-        resultado = simpledialog.askstring("Registrar Partido", "Resultado (ej: 3-1):")
+        # Crear una nueva ventana para registrar partidos
+        match_window = tk.Toplevel(self.root)
+        match_window.title("Registrar Partido")
+
+        # Obtener la lista de jugadores
+        jugadores = self.db.fetch_all("SELECT nombre, apellido FROM jugadores")
+        jugadores_list = [f"{nombre} {apellido}" for nombre, apellido in jugadores]
+
+        # Combobox para seleccionar el jugador 1
+        tk.Label(match_window, text="Jugador 1:").grid(row=0, column=0, padx=10, pady=10)
+        self.jugador1_combobox = ttk.Combobox(match_window, values=jugadores_list)
+        self.jugador1_combobox.grid(row=0, column=1, padx=10, pady=10)
+
+        # Combobox para seleccionar el jugador 2
+        tk.Label(match_window, text="Jugador 2:").grid(row=1, column=0, padx=10, pady=10)
+        self.jugador2_combobox = ttk.Combobox(match_window, values=jugadores_list)
+        self.jugador2_combobox.grid(row=1, column=1, padx=10, pady=10)
+
+        # Campo para ingresar el resultado
+        tk.Label(match_window, text="Resultado (ej: 3-1):").grid(row=2, column=0, padx=10, pady=10)
+        self.resultado_entry = tk.Entry(match_window)
+        self.resultado_entry.grid(row=2, column=1, padx=10, pady=10)
+
+        # Botón para registrar el partido
+        tk.Button(match_window, text="Registrar", command=lambda: self.registrar_partido(match_window)).grid(row=3, column=0, columnspan=2, pady=10)
+
+    def registrar_partido(self, match_window):
+        # Obtener los datos del formulario
+        jugador1 = self.jugador1_combobox.get()
+        jugador2 = self.jugador2_combobox.get()
+        resultado = self.resultado_entry.get()
+
+        if not jugador1 or not jugador2 or not resultado:
+            messagebox.showerror("Error", "Todos los campos son obligatorios")
+            return
+
+        # Extraer los IDs de los jugadores
+        jugador1_name, jugador1_lastname = jugador1.split(" ")
+        jugador2_name, jugador2_lastname = jugador2.split(" ")
+
+        jugador1_id = self.db.fetch_all(
+            f"SELECT id FROM jugadores WHERE nombre = {jugador1_name} and apellido = {jugador1_lastname}")
+        jugador2_id = self.db.fetch_all(
+            f"SELECT id FROM jugadores WHERE nombre = {jugador2_name} and apellido = {jugador2_lastname}")
 
         # Obtener los rankings actuales de los jugadores
-        jugador1 = self.db.fetch_all("SELECT ranking FROM jugadores WHERE id = %s", (jugador1_id,))[0]
-        jugador2 = self.db.fetch_all("SELECT ranking FROM jugadores WHERE id = %s", (jugador2_id,))[0]
+        jugador1_ranking = self.db.fetch_all("SELECT ranking FROM jugadores WHERE id = %s", (jugador1_id,))[0][0]
+        jugador2_ranking = self.db.fetch_all("SELECT ranking FROM jugadores WHERE id = %s", (jugador2_id,))[0][0]
 
         # Calcular nuevos rankings
-        nuevo_ranking1, nuevo_ranking2 = self.calcular_elo(jugador1[0], jugador2[0], resultado)
+        nuevo_ranking1, nuevo_ranking2 = self.calcular_elo(jugador1_ranking, jugador2_ranking, resultado)
 
         # Actualizar los rankings en la base de datos
         self.db.execute_query("UPDATE jugadores SET ranking = %s WHERE id = %s", (nuevo_ranking1, jugador1_id))
@@ -54,6 +94,7 @@ class TenisMesaApp:
             (jugador1_id, jugador2_id, resultado)
         )
         messagebox.showinfo("Éxito", "Partido registrado y rankings actualizados")
+        match_window.destroy()
 
     def calcular_elo(self, ranking1, ranking2, resultado):
         # Factor K (puedes ajustarlo según el nivel del jugador)
@@ -71,16 +112,45 @@ class TenisMesaApp:
             resultado1, resultado2 = 0, 1
 
         # Calcular nuevos rankings
-        nuevo_ranking1 = ranking1 + K * (resultado1 - probabilidad1)
-        nuevo_ranking2 = ranking2 + K * (resultado2 - probabilidad2)
+        points_added1 = K * (resultado1 - probabilidad1)
+        points_added2 = K * (resultado2 - probabilidad2)
+
+        print(f'Ranking 1 + {points_added1}')
+        print(f'Ranking 2 + {points_added2}')
+
+        nuevo_ranking1 = ranking1 + points_added1
+        nuevo_ranking2 = ranking2 + points_added2
 
         return round(nuevo_ranking1), round(nuevo_ranking2)
 
-    def view_rankings(self):
-        # Lógica para ver los rankings
+    def show_rankings(self):
+        # Crear una nueva ventana para mostrar los rankings
+        rankings_window = tk.Toplevel(self.root)
+        rankings_window.title("Rankings de Jugadores")
+
+        # Crear un Treeview para mostrar la tabla
+        columns = ("#", "Nombre", "Apellido", "Ranking")
+        self.tree = ttk.Treeview(rankings_window, columns=columns, show="headings")
+        self.tree.heading("#", text="#")
+        self.tree.heading("Nombre", text="Nombre")
+        self.tree.heading("Apellido", text="Apellido")
+        self.tree.heading("Ranking", text="Ranking")
+
+        # Ajustar el ancho de las columnas
+        self.tree.column("#", width=50, anchor="center")
+        self.tree.column("Nombre", width=150, anchor="w")
+        self.tree.column("Apellido", width=150, anchor="w")
+        self.tree.column("Ranking", width=100, anchor="center")
+
+        # Obtener los rankings de la base de datos
         rankings = self.db.fetch_all("SELECT nombre, apellido, ranking FROM jugadores ORDER BY ranking DESC")
-        for jugador in rankings:
-            print(jugador)  # Puedes mostrar esto en la interfaz gráfica
+
+        # Insertar los datos en la tabla
+        for i, (nombre, apellido, ranking) in enumerate(rankings, start=1):
+            self.tree.insert("", "end", values=(i, nombre, apellido, ranking))
+
+        # Añadir la tabla a la ventana
+        self.tree.pack(fill="both", expand=True)
 
     def __del__(self):
         self.db.close()
