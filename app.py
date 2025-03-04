@@ -1,7 +1,10 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from database import Database
 from PIL import Image, ImageTk
+import pandas as pd
+import os
+from datetime import datetime
 
 class TenisMesaApp:
     def __init__(self, root):
@@ -9,38 +12,54 @@ class TenisMesaApp:
         self.root.title("Control de Ranking - Club de Tenis de Mesa")
         self.db = Database(dbname="tenis_mesa", user="postgres", password="postgres")
 
+        # Configurar estilos
+        self.configure_styles()
+
         # Cargar la imagen
         self.load_image()
 
         # Interfaz gráfica
-        self.label = tk.Label(root, text="JOGA PONG - Gestor de Ranking", font=("Arial", 16))
+        self.label = tk.Label(root, text="JOGA PONG - Gestor de Ranking", font=("Arial", 16, "bold"), fg="#333")
         self.label.pack(pady=10)
 
         # Mostrar la imagen en el menú
         self.image_label = tk.Label(root, image=self.image_tk)
         self.image_label.pack(pady=10)
 
-        self.add_player_button = tk.Button(root, text="Agregar Jugador", command=self.show_add_player_window)
+        # Botones con estilos modernos
+        self.add_player_button = ttk.Button(root, text="Agregar Jugador", command=self.show_add_player_window, style="Accent.TButton")
         self.add_player_button.pack(pady=5)
 
-        self.record_match_button = tk.Button(root, text="Registrar Partido", command=self.record_match)
+        self.record_match_button = ttk.Button(root, text="Registrar Partido", command=self.record_match, style="Accent.TButton")
         self.record_match_button.pack(pady=5)
 
-        self.view_rankings_button = tk.Button(root, text="Ver Rankings", command=self.show_rankings)
+        self.view_rankings_button = ttk.Button(root, text="Ver Rankings", command=self.show_rankings, style="Accent.TButton")
         self.view_rankings_button.pack(pady=5)
 
-        self.view_matches_button = tk.Button(root, text="Ver Historial de Partidos", command=self.show_matches)
+        self.view_matches_button = ttk.Button(root, text="Ver Historial de Partidos", command=self.show_matches, style="Accent.TButton")
         self.view_matches_button.pack(pady=5)
+
+        self.export_button = ttk.Button(root, text="Exportar a Excel", command=self.export_to_excel, style="Accent.TButton")
+        self.export_button.pack(pady=5)
+
+    def configure_styles(self):
+        # Configurar estilos modernos
+        style = ttk.Style()
+        style.theme_use("clam")  # Usar un tema moderno
+        style.configure("TButton", font=("Arial", 10), padding=5)
+        style.configure("Accent.TButton", background="#4CAF50", foreground="white", font=("Arial", 10, "bold"))
+        style.map("Accent.TButton", background=[("active", "#45a049")])
 
     def load_image(self):
         # Cargar la imagen desde un archivo
         try:
-            image = Image.open("jp_logo.jpg")  # Cambia "tenis_mesa_logo.png" por la ruta de tu imagen
+            image = Image.open("jp_logo.jpg")  # Cambia "jp_logo.jpg" por la ruta de tu imagen
             image = image.resize((200, 200))  # Redimensionar la imagen si es necesario
             self.image_tk = ImageTk.PhotoImage(image)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar la imagen: {e}")
             self.image_tk = None
+
     def show_add_player_window(self):
         # Crear una nueva ventana para agregar un jugador
         add_player_window = tk.Toplevel(self.root)
@@ -56,7 +75,7 @@ class TenisMesaApp:
         self.apellido_entry.grid(row=1, column=1, padx=10, pady=10)
 
         # Botón para agregar el jugador
-        tk.Button(add_player_window, text="Agregar", command=lambda: self.add_player(add_player_window)).grid(row=3, column=0, columnspan=2, pady=10)
+        ttk.Button(add_player_window, text="Agregar", command=lambda: self.add_player(add_player_window), style="Accent.TButton").grid(row=3, column=0, columnspan=2, pady=10)
 
     def add_player(self, add_player_window):
         # Obtener los datos del formulario
@@ -107,7 +126,7 @@ class TenisMesaApp:
         self.fecha_entry.grid(row=3, column=1, padx=10, pady=10)
 
         # Botón para registrar el partido
-        tk.Button(match_window, text="Registrar", command=lambda: self.registrar_partido(match_window)).grid(row=4, column=0, columnspan=2, pady=10)
+        ttk.Button(match_window, text="Registrar", command=lambda: self.registrar_partido(match_window), style="Accent.TButton").grid(row=4, column=0, columnspan=2, pady=10)
 
     def registrar_partido(self, match_window):
         # Obtener los datos del formulario
@@ -163,62 +182,12 @@ class TenisMesaApp:
             # Registrar el partido en la base de datos
             self.db.execute_query(
                 "INSERT INTO partidos (jugador1_id, jugador2_id, resultado, fecha, ganador_id, puntos_jugador1, puntos_jugador2) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (jugador1_id, jugador2_id, resultado,fecha, ganador, puntos_jugador1, puntos_jugador2)
+                (jugador1_id, jugador2_id, resultado, fecha, ganador, puntos_jugador1, puntos_jugador2)
             )
             messagebox.showinfo("Éxito", "Partido registrado y rankings actualizados")
             match_window.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo registrar el partido: {e}")
-
-    def calcular_elo(self, ranking1, ranking2, resultado):
-        # Factor K (puedes ajustarlo según el nivel del jugador)
-        K = 32
-
-        # Calcular la probabilidad esperada
-        probabilidad1 = 1 / (1 + 10 ** ((ranking2 - ranking1) / 400))
-        probabilidad2 = 1 / (1 + 10 ** ((ranking1 - ranking2) / 400))
-
-        # Determinar el resultado (1 si gana el jugador1, 0 si gana el jugador2)
-        sets_jugador1, sets_jugador2 = map(int, resultado.split("-"))
-        if sets_jugador1 > sets_jugador2:
-            resultado1, resultado2 = 1, 0
-        else:
-            resultado1, resultado2 = 0, 1
-
-        # Calcular nuevos rankings
-        nuevo_ranking1 = ranking1 + K * (resultado1 - probabilidad1)
-        nuevo_ranking2 = ranking2 + K * (resultado2 - probabilidad2)
-
-        return round(nuevo_ranking1), round(nuevo_ranking2)
-
-    def show_rankings(self):
-        # Crear una nueva ventana para mostrar los rankings
-        rankings_window = tk.Toplevel(self.root)
-        rankings_window.title("Rankings de Jugadores")
-
-        # Crear un Treeview para mostrar la tabla
-        columns = ("#", "Nombre", "Apellido", "Ranking")
-        self.tree = ttk.Treeview(rankings_window, columns=columns, show="headings")
-        self.tree.heading("#", text="#")
-        self.tree.heading("Nombre", text="Nombre")
-        self.tree.heading("Apellido", text="Apellido")
-        self.tree.heading("Ranking", text="Ranking")
-
-        # Ajustar el ancho de las columnas
-        self.tree.column("#", width=50, anchor="center")
-        self.tree.column("Nombre", width=150, anchor="w")
-        self.tree.column("Apellido", width=150, anchor="w")
-        self.tree.column("Ranking", width=100, anchor="center")
-
-        # Obtener los rankings de la base de datos
-        rankings = self.db.fetch_all("SELECT nombre, apellido, ranking FROM jugadores ORDER BY ranking DESC")
-
-        # Insertar los datos en la tabla
-        for i, (nombre, apellido, ranking) in enumerate(rankings, start=1):
-            self.tree.insert("", "end", values=(i, nombre, apellido, ranking))
-
-        # Añadir la tabla a la ventana
-        self.tree.pack(fill="both", expand=True)
 
     def calcular_elo(self, ranking1, ranking2, resultado):
         # Factor K (puedes ajustarlo según el nivel del jugador)
@@ -321,11 +290,44 @@ class TenisMesaApp:
         """)
 
         # Insertar los datos en la tabla
-        for i, (id, jugador1, jugador2, resultado,id_ganador, ganador, puntos_jugador1, puntos_jugador2, fecha) in enumerate(partidos, start=1):
+        for i, (id, jugador1, jugador2, resultado, id_ganador, ganador, puntos_jugador1, puntos_jugador2, fecha) in enumerate(partidos, start=1):
             self.matches_tree.insert("", "end", values=(i, jugador1, jugador2, resultado, id_ganador, ganador, puntos_jugador1, puntos_jugador2, fecha))
 
         # Añadir la tabla a la ventana
         self.matches_tree.pack(fill="both", expand=True)
+
+    def export_to_excel(self):
+        # Crear la carpeta si no existe
+        export_folder = os.path.join(os.path.expanduser("~"), "Documents", "Ranking_JogaPong")
+        os.makedirs(export_folder, exist_ok=True)
+
+        # Nombre del archivo con la fecha y hora actual
+        now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        file_path = os.path.join(export_folder, f"ranking_{now}.xlsx")
+
+        # Obtener los datos de la base de datos
+        rankings = self.db.fetch_all("SELECT nombre, apellido, ranking FROM jugadores ORDER BY ranking DESC")
+        partidos = self.db.fetch_all("""
+            SELECT p.id, j1.nombre || ' ' || j1.apellido AS jugador1, 
+                   j2.nombre || ' ' || j2.apellido AS jugador2, p.resultado, p.ganador_id, j3.nombre || ' ' || j3.apellido,
+                   p.puntos_jugador1, p.puntos_jugador2, p.fecha
+            FROM partidos p
+            JOIN jugadores j1 ON p.jugador1_id = j1.id
+            JOIN jugadores j2 ON p.jugador2_id = j2.id
+            JOIN jugadores j3 on p.ganador_id = j3.id
+            ORDER BY p.fecha DESC
+        """)
+
+        # Crear un DataFrame de pandas
+        df_rankings = pd.DataFrame(rankings, columns=["Nombre", "Apellido", "Ranking"])
+        df_partidos = pd.DataFrame(partidos, columns=["ID", "Jugador 1", "Jugador 2", "Resultado", "ID_Ganador", "Ganador", "Puntos Jugador 1", "Puntos Jugador 2", "Fecha"])
+
+        # Exportar a Excel
+        with pd.ExcelWriter(file_path) as writer:
+            df_rankings.to_excel(writer, sheet_name="Rankings", index=False)
+            df_partidos.to_excel(writer, sheet_name="Partidos", index=False)
+
+        messagebox.showinfo("Éxito", f"Datos exportados a {file_path}")
 
     def __del__(self):
         self.db.close()
