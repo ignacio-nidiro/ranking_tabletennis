@@ -1,338 +1,521 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from database import Database
-from PIL import Image, ImageTk
-import pandas as pd
-import os
+import sqlite3
 from datetime import datetime
+import openpyxl
+from openpyxl.utils import get_column_letter
 
-class TenisMesaApp:
+
+class LigaTenisMesa:
     def __init__(self, root):
         self.root = root
-        self.root.title("Control de Ranking - Club de Tenis de Mesa")
-        self.db = Database(dbname="tenis_mesa", user="postgres", password="postgres")
+        self.root.title("Liga de Tenis de Mesa - Round Robin")
+        self.root.geometry("1200x800")
 
-        # Configurar estilos
-        self.configure_styles()
+        # Conectar a la base de datos
+        self.conn = sqlite3.connect('liga_tenis_mesa.db')
+        self.c = self.conn.cursor()
 
-        # Cargar la imagen
-        self.load_image()
+        # Crear tablas si no existen
+        self.crear_tablas()
 
-        # Interfaz gráfica
-        self.label = tk.Label(root, text="JOGA PONG - Gestor de Ranking", font=("Arial", 16, "bold"), fg="#333")
-        self.label.pack(pady=10)
+        # Variables de control
+        self.jugadores = []
+        self.partidos_jornada_actual = []
+        self.jornada_actual = 1
+        self.cargar_jornada_actual()
 
-        # Mostrar la imagen en el menú
-        self.image_label = tk.Label(root, image=self.image_tk)
-        self.image_label.pack(pady=10)
+        # Configurar la interfaz
+        self.configurar_interfaz()
 
-        # Botones con estilos modernos
-        self.add_player_button = ttk.Button(root, text="Agregar Jugador", command=self.show_add_player_window, style="Accent.TButton")
-        self.add_player_button.pack(pady=5)
+        # Cargar datos iniciales
+        self.actualizar_lista_jugadores()
+        self.actualizar_tabla_ranking()
+        self.generar_partidos_jornada()
 
-        self.record_match_button = ttk.Button(root, text="Registrar Partido", command=self.record_match, style="Accent.TButton")
-        self.record_match_button.pack(pady=5)
+    def crear_tablas(self):
+        # Tabla de jugadores
+        self.c.execute('''CREATE TABLE IF NOT EXISTS jugadores (
+                          id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          nombre TEXT UNIQUE,
+                          elo INTEGER DEFAULT 1000,
+                          partidos_jugados INTEGER DEFAULT 0,
+                          partidos_ganados INTEGER DEFAULT 0,
+                          partidos_perdidos INTEGER DEFAULT 0,
+                          puntos INTEGER DEFAULT 0
+                          )''')
 
-        self.view_rankings_button = ttk.Button(root, text="Ver Rankings", command=self.show_rankings, style="Accent.TButton")
-        self.view_rankings_button.pack(pady=5)
+        # Tabla de partidos
+        self.c.execute('''CREATE TABLE IF NOT EXISTS partidos (
+                          id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          jornada INTEGER,
+                          jugador1_id INTEGER,
+                          jugador2_id INTEGER,
+                          ganador_id INTEGER,
+                          fecha TEXT,
+                          FOREIGN KEY(jugador1_id) REFERENCES jugadores(id),
+                          FOREIGN KEY(jugador2_id) REFERENCES jugadores(id),
+                          FOREIGN KEY(ganador_id) REFERENCES jugadores(id)
+                          )''')
 
-        self.view_matches_button = ttk.Button(root, text="Ver Historial de Partidos", command=self.show_matches, style="Accent.TButton")
-        self.view_matches_button.pack(pady=5)
+        # Tabla de jornadas
+        self.c.execute('''CREATE TABLE IF NOT EXISTS jornadas (
+                          numero INTEGER PRIMARY KEY,
+                          completada INTEGER DEFAULT 0
+                          )''')
 
-        self.export_button = ttk.Button(root, text="Exportar a Excel", command=self.export_to_excel, style="Accent.TButton")
-        self.export_button.pack(pady=5)
+        self.conn.commit()
 
-    def configure_styles(self):
-        # Configurar estilos modernos
-        style = ttk.Style()
-        style.theme_use("clam")  # Usar un tema moderno
-        style.configure("TButton", font=("Arial", 10), padding=5)
-        style.configure("Accent.TButton", background="#4CAF50", foreground="white", font=("Arial", 10, "bold"))
-        style.map("Accent.TButton", background=[("active", "#45a049")])
+    def configurar_interfaz(self):
+        # Frame principal
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-    def load_image(self):
-        # Cargar la imagen desde un archivo
-        try:
-            image = Image.open("jp_logo.jpg")  # Cambia "jp_logo.jpg" por la ruta de tu imagen
-            image = image.resize((200, 200))  # Redimensionar la imagen si es necesario
-            self.image_tk = ImageTk.PhotoImage(image)
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo cargar la imagen: {e}")
-            self.image_tk = None
+        # Sección de jugadores
+        jugadores_frame = ttk.LabelFrame(main_frame, text="Jugadores", padding="10")
+        jugadores_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
 
-    def show_add_player_window(self):
-        # Crear una nueva ventana para agregar un jugador
-        add_player_window = tk.Toplevel(self.root)
-        add_player_window.title("Agregar Jugador")
+        self.lista_jugadores = ttk.Treeview(jugadores_frame, columns=('nombre', 'elo'), show='headings')
+        self.lista_jugadores.heading('nombre', text='Nombre')
+        self.lista_jugadores.heading('elo', text='ELO')
+        self.lista_jugadores.column('nombre', width=150)
+        self.lista_jugadores.column('elo', width=50)
+        self.lista_jugadores.pack(fill=tk.BOTH, expand=True)
 
-        # Campos para ingresar los datos del jugador
-        tk.Label(add_player_window, text="Nombre:").grid(row=0, column=0, padx=10, pady=10)
-        self.nombre_entry = tk.Entry(add_player_window)
-        self.nombre_entry.grid(row=0, column=1, padx=10, pady=10)
+        # Controles de jugadores
+        jugadores_controls = ttk.Frame(jugadores_frame)
+        jugadores_controls.pack(fill=tk.X, pady=5)
 
-        tk.Label(add_player_window, text="Apellido:").grid(row=1, column=0, padx=10, pady=10)
-        self.apellido_entry = tk.Entry(add_player_window)
-        self.apellido_entry.grid(row=1, column=1, padx=10, pady=10)
+        self.nuevo_jugador_entry = ttk.Entry(jugadores_controls)
+        self.nuevo_jugador_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        # Botón para agregar el jugador
-        ttk.Button(add_player_window, text="Agregar", command=lambda: self.add_player(add_player_window), style="Accent.TButton").grid(row=3, column=0, columnspan=2, pady=10)
+        ttk.Button(jugadores_controls, text="Añadir Jugador",
+                   command=self.agregar_jugador).pack(side=tk.LEFT, padx=5)
 
-    def add_player(self, add_player_window):
-        # Obtener los datos del formulario
-        nombre = self.nombre_entry.get()
-        apellido = self.apellido_entry.get()
+        # Sección de ranking
+        ranking_frame = ttk.LabelFrame(main_frame, text="Ranking", padding="10")
+        ranking_frame.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
 
-        if not nombre or not apellido:
-            messagebox.showerror("Error", "Nombre y Apellido son obligatorios")
-            return
+        self.tabla_ranking = ttk.Treeview(ranking_frame,
+                                          columns=('posicion', 'nombre', 'elo', 'pj', 'pg', 'pp', 'puntos'),
+                                          show='headings')
+        self.tabla_ranking.heading('posicion', text='Pos')
+        self.tabla_ranking.heading('nombre', text='Nombre')
+        self.tabla_ranking.heading('elo', text='ELO')
+        self.tabla_ranking.heading('pj', text='PJ')
+        self.tabla_ranking.heading('pg', text='PG')
+        self.tabla_ranking.heading('pp', text='PP')
+        self.tabla_ranking.heading('puntos', text='Puntos')
 
-        try:
-            # Insertar el jugador en la base de datos
-            self.db.execute_query(
-                "INSERT INTO jugadores (nombre, apellido, ranking) VALUES (%s, %s, %s)",
-                (nombre, apellido, 1000)  # Ranking inicial de 1000
-            )
-            messagebox.showinfo("Éxito", "Jugador agregado correctamente")
-            add_player_window.destroy()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo agregar el jugador: {e}")
+        for col in ('posicion', 'elo', 'pj', 'pg', 'pp', 'puntos'):
+            self.tabla_ranking.column(col, width=50, anchor='center')
+        self.tabla_ranking.column('nombre', width=150)
 
-    def record_match(self):
-        # Crear una nueva ventana para registrar partidos
-        match_window = tk.Toplevel(self.root)
-        match_window.title("Registrar Partido")
+        self.tabla_ranking.pack(fill=tk.BOTH, expand=True)
 
-        # Obtener la lista de jugadores
-        jugadores = self.db.fetch_all("SELECT id, nombre, apellido FROM jugadores")
-        jugadores_list = [f"{nombre} {apellido}" for id, nombre, apellido in jugadores]
+        # Sección de partidos
+        partidos_frame = ttk.LabelFrame(main_frame, text=f"Jornada {self.jornada_actual}", padding="10")
+        partidos_frame.grid(row=0, column=1, rowspan=2, padx=5, pady=5, sticky="nsew")
 
-        # Combobox para seleccionar el jugador 1
-        tk.Label(match_window, text="Jugador 1:").grid(row=0, column=0, padx=10, pady=10)
-        self.jugador1_combobox = ttk.Combobox(match_window, values=jugadores_list)
-        self.jugador1_combobox.grid(row=0, column=1, padx=10, pady=10)
+        self.tabla_partidos = ttk.Treeview(partidos_frame, columns=('jugador1', 'jugador2', 'ganador'), show='headings')
+        self.tabla_partidos.heading('jugador1', text='Jugador 1')
+        self.tabla_partidos.heading('jugador2', text='Jugador 2')
+        self.tabla_partidos.heading('ganador', text='Ganador')
 
-        # Combobox para seleccionar el jugador 2
-        tk.Label(match_window, text="Jugador 2:").grid(row=1, column=0, padx=10, pady=10)
-        self.jugador2_combobox = ttk.Combobox(match_window, values=jugadores_list)
-        self.jugador2_combobox.grid(row=1, column=1, padx=10, pady=10)
+        for col in ('jugador1', 'jugador2', 'ganador'):
+            self.tabla_partidos.column(col, width=150)
 
-        # Campo para ingresar el resultado
-        tk.Label(match_window, text="Resultado (ej: 3-1):").grid(row=2, column=0, padx=10, pady=10)
-        self.resultado_entry = tk.Entry(match_window)
-        self.resultado_entry.grid(row=2, column=1, padx=10, pady=10)
+        self.tabla_partidos.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(match_window, text="Fecha (ej. 2025-02-26):").grid(row=3, column=0, padx=10, pady=10)
-        self.fecha_entry = tk.Entry(match_window)
-        self.fecha_entry.grid(row=3, column=1, padx=10, pady=10)
+        # Controles de partidos
+        partidos_controls = ttk.Frame(partidos_frame)
+        partidos_controls.pack(fill=tk.X, pady=5)
 
-        # Botón para registrar el partido
-        ttk.Button(match_window, text="Registrar", command=lambda: self.registrar_partido(match_window), style="Accent.TButton").grid(row=4, column=0, columnspan=2, pady=10)
+        ttk.Button(partidos_controls, text="Registrar Resultado",
+                   command=self.registrar_resultado).pack(side=tk.LEFT, padx=5)
 
-    def registrar_partido(self, match_window):
-        # Obtener los datos del formulario
-        jugador1 = self.jugador1_combobox.get()
-        jugador2 = self.jugador2_combobox.get()
-        resultado = self.resultado_entry.get()
-        fecha = self.fecha_entry.get()
+        ttk.Button(partidos_controls, text="Importar desde Excel",
+                   command=self.importar_desde_excel).pack(side=tk.LEFT, padx=5)
 
-        if not jugador1 or not jugador2 or not resultado:
-            messagebox.showerror("Error", "Todos los campos son obligatorios")
-            return
+        ttk.Button(partidos_controls, text="Finalizar Jornada",
+                   command=self.finalizar_jornada).pack(side=tk.LEFT, padx=5)
 
-        # Validar el formato del resultado
-        try:
-            sets_jugador1, sets_jugador2 = map(int, resultado.split("-"))
-        except ValueError:
-            messagebox.showerror("Error", "El resultado debe estar en formato '3-1'")
-            return
+        # Configurar pesos de filas y columnas
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(0, weight=1)
+        main_frame.rowconfigure(1, weight=1)
 
-        # Extraer los nombres y apellidos de los jugadores
-        jugador1_nombre, jugador1_apellido = jugador1.split(" ")
-        jugador2_nombre, jugador2_apellido = jugador2.split(" ")
-
-        try:
-            # Obtener los IDs de los jugadores
-            jugador1_id = self.db.fetch_all(
-                "SELECT id FROM jugadores WHERE nombre = %s AND apellido = %s",
-                (jugador1_nombre, jugador1_apellido)
-            )[0][0]
-            jugador2_id = self.db.fetch_all(
-                "SELECT id FROM jugadores WHERE nombre = %s AND apellido = %s",
-                (jugador2_nombre, jugador2_apellido)
-            )[0][0]
-
-            # Obtener los rankings actuales de los jugadores
-            jugador1_ranking = self.db.fetch_all("SELECT ranking FROM jugadores WHERE id = %s", (jugador1_id,))[0][0]
-            jugador2_ranking = self.db.fetch_all("SELECT ranking FROM jugadores WHERE id = %s", (jugador2_id,))[0][0]
-
-            # Calcular nuevos rankings
-            nuevo_ranking1, nuevo_ranking2 = self.calcular_elo(jugador1_ranking, jugador2_ranking, resultado)
-
-            # Calcular puntos ganados o perdidos
-            puntos_jugador1 = nuevo_ranking1 - jugador1_ranking
-            puntos_jugador2 = nuevo_ranking2 - jugador2_ranking
-
-            # Determinar el ganador
-            ganador = jugador1_id if sets_jugador1 > sets_jugador2 else jugador2_id
-
-            # Actualizar los rankings en la base de datos
-            self.db.execute_query("UPDATE jugadores SET ranking = %s WHERE id = %s", (nuevo_ranking1, jugador1_id))
-            self.db.execute_query("UPDATE jugadores SET ranking = %s WHERE id = %s", (nuevo_ranking2, jugador2_id))
-
-            # Registrar el partido en la base de datos
-            self.db.execute_query(
-                "INSERT INTO partidos (jugador1_id, jugador2_id, resultado, fecha, ganador_id, puntos_jugador1, puntos_jugador2) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (jugador1_id, jugador2_id, resultado, fecha, ganador, puntos_jugador1, puntos_jugador2)
-            )
-            messagebox.showinfo("Éxito", "Partido registrado y rankings actualizados")
-            match_window.destroy()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo registrar el partido: {e}")
-
-    def calcular_elo(self, ranking1, ranking2, resultado):
-        # Factor K (puedes ajustarlo según el nivel del jugador)
-        K = 32
-
-        # Calcular la probabilidad esperada
-        probabilidad1 = 1 / (1 + 10 ** ((ranking2 - ranking1) / 400))
-        probabilidad2 = 1 / (1 + 10 ** ((ranking1 - ranking2) / 400))
-
-        # Determinar el resultado (1 si gana el jugador1, 0 si gana el jugador2)
-        sets_jugador1, sets_jugador2 = map(int, resultado.split("-"))
-        if sets_jugador1 > sets_jugador2:
-            resultado1, resultado2 = 1, 0
-        elif sets_jugador2 == sets_jugador1:
-            messagebox.showerror("Error", "Un partido no puede terminar en empate!")
-            return ranking1, ranking2
+    def cargar_jornada_actual(self):
+        self.c.execute("SELECT MAX(numero) FROM jornadas")
+        result = self.c.fetchone()
+        if result and result[0]:
+            self.jornada_actual = result[0]
+            self.c.execute("SELECT completada FROM jornadas WHERE numero=?", (self.jornada_actual,))
+            completada = self.c.fetchone()[0]
+            if completada:
+                self.jornada_actual += 1
         else:
-            resultado1, resultado2 = 0, 1
+            # Primera ejecución, insertar jornada inicial
+            self.jornada_actual = 1
+            self.c.execute("INSERT INTO jornadas (numero, completada) VALUES (?, ?)", (self.jornada_actual, 0))
+            self.conn.commit()
 
-        # Calcular nuevos rankings
-        points_added1 = K * (resultado1 - probabilidad1)
-        points_added2 = K * (resultado2 - probabilidad2)
+    def actualizar_lista_jugadores(self):
+        # Limpiar lista
+        for item in self.lista_jugadores.get_children():
+            self.lista_jugadores.delete(item)
 
-        print(f'Ranking 1 + {points_added1}')
-        print(f'Ranking 2 + {points_added2}')
+        # Obtener jugadores de la base de datos
+        self.c.execute("SELECT nombre, elo FROM jugadores ORDER BY nombre")
+        self.jugadores = [{'nombre': row[0], 'elo': row[1]} for row in self.c.fetchall()]
 
-        nuevo_ranking1 = ranking1 + points_added1
-        nuevo_ranking2 = ranking2 + points_added2
+        # Agregar a la lista
+        for jugador in self.jugadores:
+            self.lista_jugadores.insert('', 'end', values=(jugador['nombre'], jugador['elo']))
 
-        return round(nuevo_ranking1), round(nuevo_ranking2)
+    def actualizar_tabla_ranking(self):
+        # Limpiar tabla
+        for item in self.tabla_ranking.get_children():
+            self.tabla_ranking.delete(item)
 
-    def show_rankings(self):
-        # Crear una nueva ventana para mostrar los rankings
-        rankings_window = tk.Toplevel(self.root)
-        rankings_window.title("Rankings de Jugadores")
+        # Obtener ranking de la base de datos
+        self.c.execute('''SELECT nombre, elo, partidos_jugados, partidos_ganados, 
+                         partidos_perdidos, puntos FROM jugadores 
+                         ORDER BY puntos DESC, elo DESC, partidos_ganados DESC''')
+        ranking = self.c.fetchall()
 
-        # Crear un Treeview para mostrar la tabla
-        columns = ("#", "Nombre", "Apellido", "Ranking")
-        self.tree = ttk.Treeview(rankings_window, columns=columns, show="headings")
-        self.tree.heading("#", text="#")
-        self.tree.heading("Nombre", text="Nombre")
-        self.tree.heading("Apellido", text="Apellido")
-        self.tree.heading("Ranking", text="Ranking")
+        # Agregar a la tabla
+        for i, row in enumerate(ranking, 1):
+            self.tabla_ranking.insert('', 'end', values=(i, row[0], row[1], row[2], row[3], row[4], row[5]))
 
-        # Ajustar el ancho de las columnas
-        self.tree.column("#", width=50, anchor="center")
-        self.tree.column("Nombre", width=150, anchor="w")
-        self.tree.column("Apellido", width=150, anchor="w")
-        self.tree.column("Ranking", width=100, anchor="center")
+    def generar_partidos_jornada(self):
+        # Limpiar tabla de partidos
+        for item in self.tabla_partidos.get_children():
+            self.tabla_partidos.delete(item)
 
-        # Obtener los rankings de la base de datos
-        rankings = self.db.fetch_all("SELECT nombre, apellido, ranking FROM jugadores ORDER BY ranking DESC")
+        # Verificar si ya hay partidos generados para esta jornada
+        self.c.execute('''SELECT j1.nombre, j2.nombre, jg.nombre 
+                         FROM partidos p
+                         JOIN jugadores j1 ON p.jugador1_id = j1.id
+                         JOIN jugadores j2 ON p.jugador2_id = j2.id
+                         LEFT JOIN jugadores jg ON p.ganador_id = jg.id
+                         WHERE p.jornada = ?''', (self.jornada_actual,))
+        partidos_existentes = self.c.fetchall()
 
-        # Insertar los datos en la tabla
-        for i, (nombre, apellido, ranking) in enumerate(rankings, start=1):
-            self.tree.insert("", "end", values=(i, nombre, apellido, ranking))
+        if partidos_existentes:
+            # Mostrar partidos existentes
+            self.partidos_jornada_actual = []
+            for partido in partidos_existentes:
+                self.tabla_partidos.insert('', 'end', values=(partido[0], partido[1], partido[2] if partido[2] else ""))
+                self.partidos_jornada_actual.append({
+                    'jugador1': partido[0],
+                    'jugador2': partido[1],
+                    'ganador': partido[2] if partido[2] else None
+                })
+        else:
+            # Generar nuevos partidos para la jornada
+            self.partidos_jornada_actual = self.generar_round_robin()
 
-        # Añadir la tabla a la ventana
-        self.tree.pack(fill="both", expand=True)
+            # Insertar partidos en la base de datos
+            for partido in self.partidos_jornada_actual:
+                # Obtener IDs de los jugadores
+                self.c.execute("SELECT id FROM jugadores WHERE nombre=?", (partido['jugador1'],))
+                jugador1_id = self.c.fetchone()[0]
+                self.c.execute("SELECT id FROM jugadores WHERE nombre=?", (partido['jugador2'],))
+                jugador2_id = self.c.fetchone()[0]
 
-    def show_matches(self):
-        # Crear una nueva ventana para mostrar el historial de partidos
-        matches_window = tk.Toplevel(self.root)
-        matches_window.title("Historial de Partidos")
+                self.c.execute('''INSERT INTO partidos 
+                                (jornada, jugador1_id, jugador2_id, fecha)
+                                VALUES (?, ?, ?, ?)''',
+                               (self.jornada_actual, jugador1_id, jugador2_id, datetime.now().strftime("%Y-%m-%d")))
+                self.conn.commit()
 
-        # Crear un Treeview para mostrar la tabla
-        columns = ("#", "Jugador 1", "Jugador 2", "Resultado", "ID_Ganador", "Ganador", "Puntos Jugador 1", "Puntos Jugador 2", "Fecha")
-        self.matches_tree = ttk.Treeview(matches_window, columns=columns, show="headings")
-        self.matches_tree.heading("#", text="#")
-        self.matches_tree.heading("Jugador 1", text="Jugador 1")
-        self.matches_tree.heading("Jugador 2", text="Jugador 2")
-        self.matches_tree.heading("Resultado", text="Resultado")
-        self.matches_tree.heading("ID_Ganador", text="ID_Ganador")
-        self.matches_tree.heading("Ganador", text="Ganador")
-        self.matches_tree.heading("Puntos Jugador 1", text="Puntos Jugador 1")
-        self.matches_tree.heading("Puntos Jugador 2", text="Puntos Jugador 2")
-        self.matches_tree.heading("Fecha", text="Fecha")
+                # Mostrar en la tabla
+                self.tabla_partidos.insert('', 'end', values=(partido['jugador1'], partido['jugador2'], ""))
 
-        # Ajustar el ancho de las columnas
-        self.matches_tree.column("#", width=50, anchor="center")
-        self.matches_tree.column("Jugador 1", width=150, anchor="w")
-        self.matches_tree.column("Jugador 2", width=150, anchor="w")
-        self.matches_tree.column("Resultado", width=100, anchor="center")
-        self.matches_tree.column("ID_Ganador", width=50, anchor="w")
-        self.matches_tree.column("Ganador", width=150, anchor="w")
-        self.matches_tree.column("Puntos Jugador 1", width=100, anchor="center")
-        self.matches_tree.column("Puntos Jugador 2", width=100, anchor="center")
-        self.matches_tree.column("Fecha", width=150, anchor="center")
+    def generar_round_robin(self):
+        if len(self.jugadores) < 2:
+            return []
 
-        # Obtener el historial de partidos de la base de datos
-        partidos = self.db.fetch_all("""
-            SELECT p.id, j1.nombre || ' ' || j1.apellido AS jugador1, 
-                   j2.nombre || ' ' || j2.apellido AS jugador2, p.resultado, p.ganador_id, j3.nombre || ' ' || j3.apellido,
-                   p.puntos_jugador1, p.puntos_jugador2, p.fecha
-            FROM partidos p
-            JOIN jugadores j1 ON p.jugador1_id = j1.id
-            JOIN jugadores j2 ON p.jugador2_id = j2.id
-            JOIN jugadores j3 on p.ganador_id = j3.id
-            ORDER BY p.fecha DESC
-        """)
+        # Algoritmo Round Robin para generar los partidos de la jornada
+        jugadores = [j['nombre'] for j in self.jugadores]
+        n = len(jugadores)
+        partidos = []
 
-        # Insertar los datos en la tabla
-        for i, (id, jugador1, jugador2, resultado, id_ganador, ganador, puntos_jugador1, puntos_jugador2, fecha) in enumerate(partidos, start=1):
-            self.matches_tree.insert("", "end", values=(i, jugador1, jugador2, resultado, id_ganador, ganador, puntos_jugador1, puntos_jugador2, fecha))
+        # Para cada jornada, cada jugador juega 3 partidos (contra 3 jugadores diferentes)
+        # En total son 11 jornadas, cada jugador juega contra cada otro jugador exactamente 3 veces
 
-        # Añadir la tabla a la ventana
-        self.matches_tree.pack(fill="both", expand=True)
+        # Primero, verificar qué partidos ya se han jugado en jornadas anteriores
+        self.c.execute('''SELECT j1.nombre, j2.nombre, COUNT(*) as veces_jugado
+                         FROM partidos p
+                         JOIN jugadores j1 ON p.jugador1_id = j1.id
+                         JOIN jugadores j2 ON p.jugador2_id = j2.id
+                         GROUP BY j1.nombre, j2.nombre''')
+        partidos_anteriores = self.c.fetchall()
 
-    def export_to_excel(self):
-        # Crear la carpeta si no existe
-        export_folder = os.path.join(os.path.expanduser("~"), "Documents", "Ranking_JogaPong")
-        os.makedirs(export_folder, exist_ok=True)
+        # Crear un diccionario de enfrentamientos
+        enfrentamientos = {}
+        for j1 in jugadores:
+            enfrentamientos[j1] = {}
+            for j2 in jugadores:
+                if j1 != j2:
+                    enfrentamientos[j1][j2] = 0
 
-        # Nombre del archivo con la fecha y hora actual
-        now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        file_path = os.path.join(export_folder, f"ranking_{now}.xlsx")
+        for partido in partidos_anteriores:
+            j1, j2, count = partido
+            enfrentamientos[j1][j2] = count
+            enfrentamientos[j2][j1] = count
 
-        # Obtener los datos de la base de datos
-        rankings = self.db.fetch_all("SELECT nombre, apellido, ranking FROM jugadores ORDER BY ranking DESC")
-        partidos = self.db.fetch_all("""
-            SELECT p.id, j1.nombre || ' ' || j1.apellido AS jugador1, 
-                   j2.nombre || ' ' || j2.apellido AS jugador2, p.resultado, p.ganador_id, j3.nombre || ' ' || j3.apellido,
-                   p.puntos_jugador1, p.puntos_jugador2, p.fecha
-            FROM partidos p
-            JOIN jugadores j1 ON p.jugador1_id = j1.id
-            JOIN jugadores j2 ON p.jugador2_id = j2.id
-            JOIN jugadores j3 on p.ganador_id = j3.id
-            ORDER BY p.fecha DESC
-        """)
+        # Seleccionar los partidos para esta jornada
+        partidos_jornada = []
+        jugadores_por_jugar = jugadores.copy()
 
-        # Crear un DataFrame de pandas
-        df_rankings = pd.DataFrame(rankings, columns=["Nombre", "Apellido", "Ranking"])
-        df_partidos = pd.DataFrame(partidos, columns=["ID", "Jugador 1", "Jugador 2", "Resultado", "ID_Ganador", "Ganador", "Puntos Jugador 1", "Puntos Jugador 2", "Fecha"])
+        while len(partidos_jornada) < (n * 3) / 2 and len(jugadores_por_jugar) > 1:
+            # Encontrar el jugador que ha jugado menos partidos en esta jornada
+            jugador_actual = min(jugadores_por_jugar,
+                                 key=lambda x: sum(1 for p in partidos_jornada if x in [p['jugador1'], p['jugador2']]))
 
-        # Exportar a Excel
-        with pd.ExcelWriter(file_path) as writer:
-            df_rankings.to_excel(writer, sheet_name="Rankings", index=False)
-            df_partidos.to_excel(writer, sheet_name="Partidos", index=False)
+            # Encontrar oponente con quien ha jugado menos veces y que no esté ya en 3 partidos esta jornada
+            posibles_oponentes = [
+                j for j in jugadores
+                if j != jugador_actual and
+                   j in jugadores_por_jugar and
+                   sum(1 for p in partidos_jornada if j in [p['jugador1'], p['jugador2']]) < 3 and
+                   (j, jugador_actual) not in [(p['jugador1'], p['jugador2']) for p in partidos_jornada] and
+                   (jugador_actual, j) not in [(p['jugador1'], p['jugador2']) for p in partidos_jornada]
+            ]
 
-        messagebox.showinfo("Éxito", f"Datos exportados a {file_path}")
+            if not posibles_oponentes:
+                # No hay oponentes válidos, pasar al siguiente jugador
+                jugadores_por_jugar.remove(jugador_actual)
+                continue
+
+            # Seleccionar el oponente con el que ha jugado menos veces
+            oponente = min(posibles_oponentes, key=lambda x: enfrentamientos[jugador_actual][x])
+
+            # Crear el partido
+            partido = {
+                'jugador1': jugador_actual,
+                'jugador2': oponente,
+                'ganador': None
+            }
+            partidos_jornada.append(partido)
+
+            # Actualizar contadores de enfrentamientos
+            enfrentamientos[jugador_actual][oponente] += 1
+            enfrentamientos[oponente][jugador_actual] += 1
+
+            # Verificar si algún jugador ya tiene 3 partidos en esta jornada
+            for jugador in [jugador_actual, oponente]:
+                if sum(1 for p in partidos_jornada if jugador in [p['jugador1'], p['jugador2']]) >= 3:
+                    if jugador in jugadores_por_jugar:
+                        jugadores_por_jugar.remove(jugador)
+
+        return partidos_jornada
+
+    def agregar_jugador(self):
+        nombre = self.nuevo_jugador_entry.get().strip()
+        if not nombre:
+            messagebox.showerror("Error", "Por favor ingrese un nombre para el jugador")
+            return
+
+        try:
+            self.c.execute("INSERT INTO jugadores (nombre) VALUES (?)", (nombre,))
+            self.conn.commit()
+            self.nuevo_jugador_entry.delete(0, tk.END)
+            self.actualizar_lista_jugadores()
+            self.actualizar_tabla_ranking()
+            # Regenerar partidos si es necesario
+            if self.jornada_actual == 1 and not self.partidos_jornada_actual:
+                self.generar_partidos_jornada()
+        except sqlite3.IntegrityError:
+            messagebox.showerror("Error", f"El jugador '{nombre}' ya existe en la liga")
+
+    def registrar_resultado(self):
+        seleccion = self.tabla_partidos.selection()
+        if not seleccion:
+            messagebox.showerror("Error", "Por favor seleccione un partido para registrar el resultado")
+            return
+
+        item = seleccion[0]
+        partido_idx = self.tabla_partidos.index(item)
+        partido = self.partidos_jornada_actual[partido_idx]
+
+        if partido['ganador'] is not None:
+            messagebox.showerror("Error", "Este partido ya tiene un resultado registrado")
+            return
+
+        # Ventana de diálogo para seleccionar ganador
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Registrar Resultado")
+        dialog.geometry("300x150")
+
+        ttk.Label(dialog, text=f"{partido['jugador1']} vs {partido['jugador2']}").pack(pady=10)
+
+        ganador_var = tk.StringVar()
+        ttk.Radiobutton(dialog, text=partido['jugador1'], variable=ganador_var, value=partido['jugador1']).pack()
+        ttk.Radiobutton(dialog, text=partido['jugador2'], variable=ganador_var, value=partido['jugador2']).pack()
+
+        def guardar_resultado():
+            ganador = ganador_var.get()
+            if not ganador:
+                messagebox.showerror("Error", "Por favor seleccione un ganador")
+                return
+
+            self.registrar_resultado_partido(partido_idx, ganador)
+            dialog.destroy()
+
+        ttk.Button(dialog, text="Guardar", command=guardar_resultado).pack(pady=10)
+
+    def registrar_resultado_partido(self, partido_idx, ganador):
+        partido = self.partidos_jornada_actual[partido_idx]
+
+        # Actualizar en memoria
+        partido['ganador'] = ganador
+        self.partidos_jornada_actual[partido_idx] = partido
+
+        # Actualizar en la base de datos
+        self.c.execute('''UPDATE partidos SET ganador_id = 
+                        (SELECT id FROM jugadores WHERE nombre = ?)
+                        WHERE jornada = ? AND 
+                        jugador1_id = (SELECT id FROM jugadores WHERE nombre = ?) AND
+                        jugador2_id = (SELECT id FROM jugadores WHERE nombre = ?)''',
+                       (ganador, self.jornada_actual, partido['jugador1'], partido['jugador2']))
+
+        # Actualizar estadísticas de los jugadores
+        perdedor = partido['jugador2'] if ganador == partido['jugador1'] else partido['jugador1']
+
+        # Actualizar ganador
+        self.c.execute('''UPDATE jugadores SET 
+                        partidos_jugados = partidos_jugados + 1,
+                        partidos_ganados = partidos_ganados + 1,
+                        puntos = puntos + 3,
+                        elo = elo + 20
+                        WHERE nombre = ?''', (ganador,))
+
+        # Actualizar perdedor
+        self.c.execute('''UPDATE jugadores SET 
+                        partidos_jugados = partidos_jugados + 1,
+                        partidos_perdidos = partidos_perdidos + 1,
+                        elo = elo - 10
+                        WHERE nombre = ?''', (perdedor,))
+
+        self.conn.commit()
+
+        # Actualizar visualización
+        item = self.tabla_partidos.get_children()[partido_idx]
+        self.tabla_partidos.item(item, values=(partido['jugador1'], partido['jugador2'], ganador))
+        self.actualizar_tabla_ranking()
+
+    def importar_desde_excel(self):
+        # Pedir al usuario que seleccione el archivo Excel
+        filepath = filedialog.askopenfilename(
+            title="Seleccionar archivo Excel",
+            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+        )
+
+        if not filepath:
+            return  # Usuario canceló
+
+        try:
+            # Leer el archivo Excel
+            workbook = openpyxl.load_workbook(filepath)
+            sheet = workbook.active
+
+            # Buscar los partidos en el Excel
+            partidos_encontrados = []
+
+            for row in sheet.iter_rows(values_only=True):
+                if len(row) >= 3 and row[0] and row[1]:  # Jugador1 y Jugador2 existen
+                    jugador1 = str(row[0]).strip()
+                    jugador2 = str(row[1]).strip()
+                    ganador = str(row[2]).strip() if len(row) > 2 and row[2] else None
+
+                    if jugador1 and jugador2:
+                        partidos_encontrados.append({
+                            'jugador1': jugador1,
+                            'jugador2': jugador2,
+                            'ganador': ganador
+                        })
+
+            if not partidos_encontrados:
+                messagebox.showerror("Error", "No se encontraron partidos en el archivo Excel")
+                return
+
+            # Verificar que todos los jugadores existen en la base de datos
+            jugadores_existentes = {j['nombre'] for j in self.jugadores}
+            jugadores_en_excel = set()
+
+            for partido in partidos_encontrados:
+                jugadores_en_excel.add(partido['jugador1'])
+                jugadores_en_excel.add(partido['jugador2'])
+                if partido['ganador']:
+                    jugadores_en_excel.add(partido['ganador'])
+
+            jugadores_faltantes = jugadores_en_excel - jugadores_existentes
+            if jugadores_faltantes:
+                messagebox.showerror("Error",
+                                     f"Los siguientes jugadores no existen en la liga:\n{', '.join(jugadores_faltantes)}")
+                return
+
+            # Procesar los partidos encontrados
+            partidos_importados = 0
+
+            for partido_excel in partidos_encontrados:
+                # Buscar el partido correspondiente en la jornada actual
+                for i, partido in enumerate(self.partidos_jornada_actual):
+                    if ((partido['jugador1'] == partido_excel['jugador1'] and
+                         partido['jugador2'] == partido_excel['jugador2']) or
+                            (partido['jugador1'] == partido_excel['jugador2'] and
+                             partido['jugador2'] == partido_excel['jugador1'])):
+
+                        if partido['ganador'] is not None:
+                            continue  # Ya tiene resultado
+
+                        if partido_excel['ganador']:
+                            # Registrar el resultado
+                            self.registrar_resultado_partido(i, partido_excel['ganador'])
+                            partidos_importados += 1
+                        break
+
+            messagebox.showinfo("Importación completada",
+                                f"Se importaron resultados para {partidos_importados} partidos")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo leer el archivo Excel:\n{str(e)}")
+
+    def finalizar_jornada(self):
+        # Verificar que todos los partidos tienen resultado
+        for partido in self.partidos_jornada_actual:
+            if partido['ganador'] is None:
+                messagebox.showerror("Error", "Hay partidos sin resultado registrado")
+                return
+
+        # Marcar jornada como completada
+        self.c.execute("UPDATE jornadas SET completada = 1 WHERE numero = ?", (self.jornada_actual,))
+
+        # Insertar nueva jornada si no es la última
+        if self.jornada_actual < 11:
+            self.jornada_actual += 1
+            self.c.execute("INSERT INTO jornadas (numero, completada) VALUES (?, ?)", (self.jornada_actual, 0))
+            self.conn.commit()
+
+            # Actualizar interfaz
+            partidos_frame = self.tabla_partidos.master
+            partidos_frame.config(text=f"Jornada {self.jornada_actual}")
+            self.generar_partidos_jornada()
+
+            messagebox.showinfo("Éxito",
+                                f"Jornada {self.jornada_actual - 1} completada. Jornada {self.jornada_actual} generada.")
+        else:
+            messagebox.showinfo("Liga Completa", "¡Todas las jornadas han sido completadas!")
 
     def __del__(self):
-        self.db.close()
+        self.conn.close()
+
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = TenisMesaApp(root)
+    app = LigaTenisMesa(root)
     root.mainloop()
