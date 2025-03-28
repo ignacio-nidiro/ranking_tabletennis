@@ -2,10 +2,9 @@
 
 ## Requisitos
 - Python 3.9 o superior
-- PostgreSQL
+- openpyxl
 
-## Instalación
-1. Clona este repositorio o descarga los archivos.
-2. Instala las dependencias:
-   ```bash
-   pip install -r requirements.txt
+## Features faltantes
+- Apartir de las nombres de los participantes crear el rol de juegos 3 partidos por jornada(Hoja de excel por jornada con partidos por jugar) para cada quien completando los 3 round robin a lo largo de la liga
+- Validar Ranking
+- Agregar el formater a la GUI para generar y leer el archivo fuente desde ahi
