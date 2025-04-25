@@ -1,19 +1,24 @@
+import os
 import tkinter as tk
+from collections import defaultdict
 from tkinter import ttk, messagebox, filedialog
+from PIL import Image, ImageTk
 import sqlite3
 from datetime import datetime
-import openpyxl
-from openpyxl.utils import get_column_letter
+import pandas as pd
+import datetime as dt
 
 
 class LigaTenisMesa:
     def __init__(self, root):
         self.root = root
         self.root.title("Liga de Tenis de Mesa - Round Robin")
-        self.root.geometry("1200x800")
+        self.root.geometry("1400x800")
+
+        self.division = self.pedir_numero_division()
 
         # Conectar a la base de datos
-        self.conn = sqlite3.connect('liga_tenis_mesa.db')
+        self.conn = sqlite3.connect(f'liga_tenis_mesa_division_{self.division}.db')
         self.c = self.conn.cursor()
 
         # Crear tablas si no existen
@@ -53,6 +58,8 @@ class LigaTenisMesa:
                           jugador2_id INTEGER,
                           ganador_id INTEGER,
                           fecha TEXT,
+                          hora TEXT,
+                          mesa INTEGER,
                           FOREIGN KEY(jugador1_id) REFERENCES jugadores(id),
                           FOREIGN KEY(jugador2_id) REFERENCES jugadores(id),
                           FOREIGN KEY(ganador_id) REFERENCES jugadores(id)
@@ -61,7 +68,8 @@ class LigaTenisMesa:
         # Tabla de jornadas
         self.c.execute('''CREATE TABLE IF NOT EXISTS jornadas (
                           numero INTEGER PRIMARY KEY,
-                          completada INTEGER DEFAULT 0
+                          completada INTEGER DEFAULT 0,
+                          n_mesas INTEGER
                           )''')
 
         self.conn.commit()
@@ -70,6 +78,11 @@ class LigaTenisMesa:
         # Frame principal
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
+
+        logo = Image.open("jp_logo.jpg")
+        logo = logo.resize((100, 100))
+        self.logo_image = ImageTk.PhotoImage(logo)  # <--- Important!
+        logo_label = tk.Label(main_frame, image=self.logo_image)
 
         # Sección de jugadores
         jugadores_frame = ttk.LabelFrame(main_frame, text="Jugadores", padding="10")
@@ -116,13 +129,21 @@ class LigaTenisMesa:
         # Sección de partidos
         partidos_frame = ttk.LabelFrame(main_frame, text=f"Jornada {self.jornada_actual}", padding="10")
         partidos_frame.grid(row=0, column=1, rowspan=2, padx=5, pady=5, sticky="nsew")
+        # Add logo above partidos_frame
+        logo_label.grid(row=0, column=2, padx=5, pady=5, sticky="n")
 
-        self.tabla_partidos = ttk.Treeview(partidos_frame, columns=('jugador1', 'jugador2', 'ganador'), show='headings')
+        self.tabla_partidos = ttk.Treeview(partidos_frame, columns=('jugador1',
+                                                                    'jugador2',
+                                                                    'hora',
+                                                                    'n_mesa',
+                                                                    'ganador'), show='headings')
         self.tabla_partidos.heading('jugador1', text='Jugador 1')
         self.tabla_partidos.heading('jugador2', text='Jugador 2')
+        self.tabla_partidos.heading('hora', text='Hora')
+        self.tabla_partidos.heading('n_mesa', text='Número de Mesa')
         self.tabla_partidos.heading('ganador', text='Ganador')
 
-        for col in ('jugador1', 'jugador2', 'ganador'):
+        for col in ('jugador1', 'jugador2', 'hora', 'n_mesa', 'ganador'):
             self.tabla_partidos.column(col, width=150)
 
         self.tabla_partidos.pack(fill=tk.BOTH, expand=True)
@@ -133,6 +154,9 @@ class LigaTenisMesa:
 
         ttk.Button(partidos_controls, text="Registrar Resultado",
                    command=self.registrar_resultado).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(partidos_controls, text="Exportar Jornada Actual",
+                   command=self.exportar_partidos_a_excel).pack(side=tk.LEFT, padx=5)
 
         ttk.Button(partidos_controls, text="Importar desde Excel",
                    command=self.importar_desde_excel).pack(side=tk.LEFT, padx=5)
@@ -158,8 +182,56 @@ class LigaTenisMesa:
         else:
             # Primera ejecución, insertar jornada inicial
             self.jornada_actual = 1
-            self.c.execute("INSERT INTO jornadas (numero, completada) VALUES (?, ?)", (self.jornada_actual, 0))
+            n_mesas_jornada = self.pedir_n_mesas()
+            print(n_mesas_jornada)
+            self.c.execute("INSERT INTO jornadas (numero, completada, n_mesas) VALUES (?,?,?)", (self.jornada_actual, 0, n_mesas_jornada))
             self.conn.commit()
+
+    def pedir_n_mesas(self):
+        popup = tk.Toplevel(self.root)
+        popup.title("Introduce el Número de Mesas")
+
+        tk.Label(popup, text="Numero de mesas de la Jornada:").pack(padx=10, pady=10)
+        entry = tk.Entry(popup)
+        entry.pack(padx=10)
+
+        resultado = {"valor": None}
+
+        def on_confirm():
+            resultado['valor'] = entry.get()
+            print("Valor recibido:", resultado['valor'])  # Aquí puedes usar el valor como quieras
+            popup.destroy()
+
+        tk.Button(popup, text="Aceptar", command=on_confirm).pack(pady=10)
+
+        # Hacer que el popup sea modal
+        popup.transient(self.root)
+        popup.grab_set()
+        self.root.wait_window(popup)
+        return resultado['valor']
+
+    def pedir_numero_division(self) -> int:
+        popup = tk.Toplevel(self.root)
+        popup.title("Introduce la Division")
+
+        tk.Label(popup, text="Division:").pack(padx=10, pady=10)
+        entry = tk.Entry(popup)
+        entry.pack(padx=10)
+
+        resultado = {"valor": None}
+
+        def on_confirm():
+            resultado['valor'] = entry.get()
+            print("Valor recibido:", resultado['valor'])  # Aquí puedes usar el valor como quieras
+            popup.destroy()
+
+        tk.Button(popup, text="Aceptar", command=on_confirm).pack(pady=10)
+
+        # Hacer que el popup sea modal
+        popup.transient(self.root)
+        popup.grab_set()
+        self.root.wait_window(popup)
+        return resultado['valor']
 
     def actualizar_lista_jugadores(self):
         # Limpiar lista
@@ -195,7 +267,7 @@ class LigaTenisMesa:
             self.tabla_partidos.delete(item)
 
         # Verificar si ya hay partidos generados para esta jornada
-        self.c.execute('''SELECT j1.nombre, j2.nombre, jg.nombre 
+        self.c.execute('''SELECT j1.nombre, j2.nombre, p.hora, p.mesa, jg.nombre 
                          FROM partidos p
                          JOIN jugadores j1 ON p.jugador1_id = j1.id
                          JOIN jugadores j2 ON p.jugador2_id = j2.id
@@ -207,11 +279,13 @@ class LigaTenisMesa:
             # Mostrar partidos existentes
             self.partidos_jornada_actual = []
             for partido in partidos_existentes:
-                self.tabla_partidos.insert('', 'end', values=(partido[0], partido[1], partido[2] if partido[2] else ""))
+                self.tabla_partidos.insert('', 'end', values=(partido[0], partido[1], partido[2], partido[3], partido[4] if partido[4] else ""))
                 self.partidos_jornada_actual.append({
                     'jugador1': partido[0],
                     'jugador2': partido[1],
-                    'ganador': partido[2] if partido[2] else None
+                    'hora': partido[2],
+                    'mesa': partido[3],
+                    'ganador': partido[4] if partido[4] else None
                 })
         else:
             # Generar nuevos partidos para la jornada
@@ -226,13 +300,13 @@ class LigaTenisMesa:
                 jugador2_id = self.c.fetchone()[0]
 
                 self.c.execute('''INSERT INTO partidos 
-                                (jornada, jugador1_id, jugador2_id, fecha)
-                                VALUES (?, ?, ?, ?)''',
-                               (self.jornada_actual, jugador1_id, jugador2_id, datetime.now().strftime("%Y-%m-%d")))
+                                (jornada, jugador1_id, jugador2_id, hora, mesa, fecha)
+                                VALUES (?, ?, ?, ?, ?, ?)''',
+                               (self.jornada_actual, jugador1_id, jugador2_id, partido['hora'], partido['mesa'], dt.datetime.now().strftime("%Y-%m-%d")))
                 self.conn.commit()
 
                 # Mostrar en la tabla
-                self.tabla_partidos.insert('', 'end', values=(partido['jugador1'], partido['jugador2'], ""))
+                self.tabla_partidos.insert('', 'end', values=(partido['jugador1'], partido['jugador2'], partido['hora'], partido['mesa'], ""))
 
     def generar_round_robin(self):
         if len(self.jugadores) < 2:
@@ -312,7 +386,42 @@ class LigaTenisMesa:
                     if jugador in jugadores_por_jugar:
                         jugadores_por_jugar.remove(jugador)
 
-        return partidos_jornada
+        self.c.execute("SELECT n_mesas FROM jornadas WHERE numero=?", (self.jornada_actual,))
+        n_mesas = self.c.fetchone()[0]
+
+        hora_inicio = dt.datetime.strptime("09:00", '%H:%M')
+
+        slot = 0
+        agenda = []
+        ocupacion_jugadores = defaultdict(list)
+        while partidos_jornada:
+            hora_slot = hora_inicio + slot * dt.timedelta(minutes=30)
+            mesas_disponibles = n_mesas
+            for partido in partidos_jornada[:]:
+
+                j1 = partido['jugador1']
+                j2 = partido['jugador2']
+
+                ocupado_j1 = any(hora_slot == h for h in ocupacion_jugadores[j1])
+                ocupado_j2 = any(hora_slot == h for h in ocupacion_jugadores[j2])
+
+                if not ocupado_j1 and not ocupado_j2 and mesas_disponibles > 0:
+                    agenda.append({
+                        'jugador1': j1,
+                        'jugador2': j2,
+                        'hora': hora_slot.strftime('%H:%M'),
+                        'mesa': n_mesas - mesas_disponibles + 1,
+                        'ganador': None})
+                    ocupacion_jugadores[j1].append(hora_slot)
+                    ocupacion_jugadores[j2].append(hora_slot)
+                    partidos_jornada.remove(partido)
+                    mesas_disponibles -= 1
+
+                if mesas_disponibles == 0:
+                    break
+            slot += 1
+
+        return agenda
 
     def agregar_jugador(self):
         nombre = self.nuevo_jugador_entry.get().strip()
@@ -326,11 +435,17 @@ class LigaTenisMesa:
             self.nuevo_jugador_entry.delete(0, tk.END)
             self.actualizar_lista_jugadores()
             self.actualizar_tabla_ranking()
-            # Regenerar partidos si es necesario
-            if self.jornada_actual == 1 and not self.partidos_jornada_actual:
-                self.generar_partidos_jornada()
+            self.actualizar_tabla_partidos()
+            if self.jornada_actual == 1:
+                self.generar_round_robin()
+
         except sqlite3.IntegrityError:
             messagebox.showerror("Error", f"El jugador '{nombre}' ya existe en la liga")
+
+    def actualizar_tabla_partidos(self):
+        self.c.execute(f"DELETE FROM partidos WHERE jornada = {self.jornada_actual}")
+        self.conn.commit()
+        self.generar_partidos_jornada()
 
     def registrar_resultado(self):
         seleccion = self.tabla_partidos.selection()
@@ -405,8 +520,29 @@ class LigaTenisMesa:
 
         # Actualizar visualización
         item = self.tabla_partidos.get_children()[partido_idx]
-        self.tabla_partidos.item(item, values=(partido['jugador1'], partido['jugador2'], ganador))
+        self.tabla_partidos.item(item, values=(partido['jugador1'], partido['jugador2'], partido['hora'], partido['mesa'], ganador))
         self.actualizar_tabla_ranking()
+
+    def exportar_partidos_a_excel(self):
+        self.c.execute(f"SELECT jornada, j1.nombre Jugador1, j2.nombre Jugador2, jg.nombre Ganador, fecha, hora, mesa "
+                       f"FROM partidos "
+                       f"LEFT JOIN jugadores j1 ON jugador1_id=j1.id "
+                       f"LEFT JOIN jugadores j2 ON jugador2_id=j2.id "
+                       f"LEFT JOIN jugadores jg ON ganador_id=jg.id "
+                       f"WHERE jornada = {self.jornada_actual}")
+
+        names = [x[0] for x in self.c.description]
+        partidos_jornada_actual = self.c.fetchall()
+        partidos_df = pd.DataFrame(partidos_jornada_actual, columns=names)
+
+        try:
+            os.mkdir("excel_files/")
+        except Exception:
+            print("Carpeta 'excel_files' creada con anterioridad")
+
+        partidos_df.to_excel(f"excel_files/partidos_division{self.division}_jornada_{self.jornada_actual}.xlsx")
+        messagebox.showinfo("Éxito",
+                            f"Jornada {self.jornada_actual} exportada a Excel.")
 
     def importar_desde_excel(self):
         # Pedir al usuario que seleccione el archivo Excel
@@ -420,23 +556,28 @@ class LigaTenisMesa:
 
         try:
             # Leer el archivo Excel
-            workbook = openpyxl.load_workbook(filepath)
-            sheet = workbook.active
+            import_df = pd.read_excel(filepath)
 
             # Buscar los partidos en el Excel
             partidos_encontrados = []
 
-            for row in sheet.iter_rows(values_only=True):
-                if len(row) >= 3 and row[0] and row[1]:  # Jugador1 y Jugador2 existen
-                    jugador1 = str(row[0]).strip()
-                    jugador2 = str(row[1]).strip()
-                    ganador = str(row[2]).strip() if len(row) > 2 and row[2] else None
+            for index, row in import_df.iterrows():
+                if len(row) >= 8 and row[2] and row[3]:  # Jugador1 y Jugador2 existen
+                    jugador1 = str(row[2]).strip()
+                    jugador2 = str(row[3]).strip()
+                    ganador = str(row[4]).strip() if len(row) > 4 and row[4] else None
+                    fecha = str(row[5]).strip() if len(row) > 5 and row[5] else None
+                    hora = str(row[6]).strip() if len(row) > 6 and row[6] else None
+                    mesa = str(row[7]).strip() if len(row) > 7 and row[7] else None
 
                     if jugador1 and jugador2:
                         partidos_encontrados.append({
                             'jugador1': jugador1,
                             'jugador2': jugador2,
-                            'ganador': ganador
+                            'ganador': ganador,
+                            'fecha': fecha,
+                            'hora': hora,
+                            'mesa': mesa
                         })
 
             if not partidos_encontrados:
@@ -471,6 +612,7 @@ class LigaTenisMesa:
                              partido['jugador2'] == partido_excel['jugador1'])):
 
                         if partido['ganador'] is not None:
+                            print(f"Ganador = {partido['ganador']}")
                             continue  # Ya tiene resultado
 
                         if partido_excel['ganador']:
@@ -481,6 +623,8 @@ class LigaTenisMesa:
 
             messagebox.showinfo("Importación completada",
                                 f"Se importaron resultados para {partidos_importados} partidos")
+            print(partidos_encontrados)
+            print(self.partidos_jornada_actual)
 
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo leer el archivo Excel:\n{str(e)}")
@@ -498,7 +642,8 @@ class LigaTenisMesa:
         # Insertar nueva jornada si no es la última
         if self.jornada_actual < 11:
             self.jornada_actual += 1
-            self.c.execute("INSERT INTO jornadas (numero, completada) VALUES (?, ?)", (self.jornada_actual, 0))
+            n_mesas_jornada = self.pedir_n_mesas()
+            self.c.execute("INSERT INTO jornadas (numero, completada, n_mesas) VALUES (?, ?, ?)", (self.jornada_actual, 0, n_mesas_jornada))
             self.conn.commit()
 
             # Actualizar interfaz
