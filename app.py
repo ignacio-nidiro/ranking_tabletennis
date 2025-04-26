@@ -389,7 +389,7 @@ class LigaTenisMesa:
         self.c.execute("SELECT n_mesas FROM jornadas WHERE numero=?", (self.jornada_actual,))
         n_mesas = self.c.fetchone()[0]
 
-        hora_inicio = dt.datetime.strptime("09:00", '%H:%M')
+        hora_inicio = dt.datetime.strptime("09:30", '%H:%M') if self.division == '1' else dt.datetime.strptime("04:30", '%H:%M')
 
         slot = 0
         agenda = []
