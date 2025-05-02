@@ -13,7 +13,7 @@ class LigaTenisMesa:
     def __init__(self, root):
         self.root = root
         self.root.title("Liga de Tenis de Mesa - Round Robin")
-        self.root.geometry("1400x800")
+        self.root.geometry("1500x800")
 
         self.division = self.pedir_numero_division()
 
@@ -60,6 +60,7 @@ class LigaTenisMesa:
                           fecha TEXT,
                           hora TEXT,
                           mesa INTEGER,
+                          reprogramado BOOL,
                           FOREIGN KEY(jugador1_id) REFERENCES jugadores(id),
                           FOREIGN KEY(jugador2_id) REFERENCES jugadores(id),
                           FOREIGN KEY(ganador_id) REFERENCES jugadores(id)
@@ -132,19 +133,23 @@ class LigaTenisMesa:
         # Add logo above partidos_frame
         logo_label.grid(row=0, column=2, padx=5, pady=5, sticky="n")
 
-        self.tabla_partidos = ttk.Treeview(partidos_frame, columns=('jugador1',
+        self.tabla_partidos = ttk.Treeview(partidos_frame, columns=('jornada',
+                                                                    'jugador1',
                                                                     'jugador2',
                                                                     'hora',
                                                                     'n_mesa',
                                                                     'ganador'), show='headings')
+        self.tabla_partidos.heading('jornada', text='No. Jornada')
         self.tabla_partidos.heading('jugador1', text='Jugador 1')
         self.tabla_partidos.heading('jugador2', text='Jugador 2')
         self.tabla_partidos.heading('hora', text='Hora')
-        self.tabla_partidos.heading('n_mesa', text='Número de Mesa')
+        self.tabla_partidos.heading('n_mesa', text='No. Mesa')
         self.tabla_partidos.heading('ganador', text='Ganador')
 
-        for col in ('jugador1', 'jugador2', 'hora', 'n_mesa', 'ganador'):
-            self.tabla_partidos.column(col, width=150)
+        self.tabla_partidos.column('jornada', width=75, anchor='center')
+        self.tabla_partidos.column('n_mesa', width=75, anchor='center')
+        for col in ('jugador1', 'jugador2', 'hora', 'ganador'):
+            self.tabla_partidos.column(col, width=150, anchor='center')
 
         self.tabla_partidos.pack(fill=tk.BOTH, expand=True)
 
@@ -183,7 +188,7 @@ class LigaTenisMesa:
             # Primera ejecución, insertar jornada inicial
             self.jornada_actual = 1
             n_mesas_jornada = self.pedir_n_mesas()
-            print(n_mesas_jornada)
+            # print(n_mesas_jornada)
             self.c.execute("INSERT INTO jornadas (numero, completada, n_mesas) VALUES (?,?,?)", (self.jornada_actual, 0, n_mesas_jornada))
             self.conn.commit()
 
@@ -199,7 +204,7 @@ class LigaTenisMesa:
 
         def on_confirm():
             resultado['valor'] = entry.get()
-            print("Valor recibido:", resultado['valor'])  # Aquí puedes usar el valor como quieras
+            # print("Valor recibido:", resultado['valor'])  # Aquí puedes usar el valor como quieras
             popup.destroy()
 
         tk.Button(popup, text="Aceptar", command=on_confirm).pack(pady=10)
@@ -222,7 +227,7 @@ class LigaTenisMesa:
 
         def on_confirm():
             resultado['valor'] = entry.get()
-            print("Valor recibido:", resultado['valor'])  # Aquí puedes usar el valor como quieras
+            # print("Valor recibido:", resultado['valor'])  # Aquí puedes usar el valor como quieras
             popup.destroy()
 
         tk.Button(popup, text="Aceptar", command=on_confirm).pack(pady=10)
@@ -262,31 +267,45 @@ class LigaTenisMesa:
             self.tabla_ranking.insert('', 'end', values=(i, row[0], row[1], row[2], row[3], row[4], row[5]))
 
     def generar_partidos_jornada(self):
+
+        def llenar_partidos_jornada(partidos):
+            for partido in partidos:
+                self.tabla_partidos.insert('', 'end', values=(partido[0], partido[1], partido[2], partido[3], partido[4], partido[5] if partido[5] else ""))
+                self.partidos_jornada_actual.append({
+                    'jornada': partido[0],
+                    'jugador1': partido[1],
+                    'jugador2': partido[2],
+                    'hora': partido[3],
+                    'mesa': partido[4],
+                    'ganador': partido[5] if partido[5] else None
+                })
+
         # Limpiar tabla de partidos
         for item in self.tabla_partidos.get_children():
             self.tabla_partidos.delete(item)
 
         # Verificar si ya hay partidos generados para esta jornada
-        self.c.execute('''SELECT j1.nombre, j2.nombre, p.hora, p.mesa, jg.nombre 
+        self.c.execute('''SELECT p.jornada, j1.nombre, j2.nombre, p.hora, p.mesa, jg.nombre 
                          FROM partidos p
                          JOIN jugadores j1 ON p.jugador1_id = j1.id
                          JOIN jugadores j2 ON p.jugador2_id = j2.id
                          LEFT JOIN jugadores jg ON p.ganador_id = jg.id
                          WHERE p.jornada = ?''', (self.jornada_actual,))
-        partidos_existentes = self.c.fetchall()
+        partidos_existentes_jornada_actual = self.c.fetchall()
 
-        if partidos_existentes:
+        self.c.execute('''SELECT p.jornada, j1.nombre, j2.nombre, p.hora, p.mesa, jg.nombre 
+                                 FROM partidos p
+                                 JOIN jugadores j1 ON p.jugador1_id = j1.id
+                                 JOIN jugadores j2 ON p.jugador2_id = j2.id
+                                 LEFT JOIN jugadores jg ON p.ganador_id = jg.id
+                                 WHERE p.jornada < ? and jg.id is null''', (self.jornada_actual,))
+        partidos_wo_ganador_pasados = self.c.fetchall()
+
+        if partidos_existentes_jornada_actual:
             # Mostrar partidos existentes
             self.partidos_jornada_actual = []
-            for partido in partidos_existentes:
-                self.tabla_partidos.insert('', 'end', values=(partido[0], partido[1], partido[2], partido[3], partido[4] if partido[4] else ""))
-                self.partidos_jornada_actual.append({
-                    'jugador1': partido[0],
-                    'jugador2': partido[1],
-                    'hora': partido[2],
-                    'mesa': partido[3],
-                    'ganador': partido[4] if partido[4] else None
-                })
+            llenar_partidos_jornada(partidos_wo_ganador_pasados)
+            llenar_partidos_jornada(partidos_existentes_jornada_actual)
         else:
             # Generar nuevos partidos para la jornada
             self.partidos_jornada_actual = self.generar_round_robin()
@@ -299,14 +318,18 @@ class LigaTenisMesa:
                 self.c.execute("SELECT id FROM jugadores WHERE nombre=?", (partido['jugador2'],))
                 jugador2_id = self.c.fetchone()[0]
 
-                self.c.execute('''INSERT INTO partidos 
-                                (jornada, jugador1_id, jugador2_id, hora, mesa, fecha)
-                                VALUES (?, ?, ?, ?, ?, ?)''',
-                               (self.jornada_actual, jugador1_id, jugador2_id, partido['hora'], partido['mesa'], dt.datetime.now().strftime("%Y-%m-%d")))
+                if partido['reprogramado']:
+                    self.c.execute('''UPDATE partidos SET reprogramado = True, hora = ?, mesa = ? WHERE jugador1_id = ? and jugador2_id = ? and jornada = ?''',
+                                   (partido['hora'], partido['mesa'], jugador1_id, jugador2_id, partido['jornada']))
+                else:
+                    self.c.execute('''INSERT INTO partidos 
+                                    (jornada, jugador1_id, jugador2_id, hora, mesa, fecha)
+                                    VALUES (?, ?, ?, ?, ?, ?)''',
+                                   (self.jornada_actual, jugador1_id, jugador2_id, partido['hora'], partido['mesa'], dt.datetime.now().strftime("%Y-%m-%d")))
                 self.conn.commit()
 
                 # Mostrar en la tabla
-                self.tabla_partidos.insert('', 'end', values=(partido['jugador1'], partido['jugador2'], partido['hora'], partido['mesa'], ""))
+                self.tabla_partidos.insert('', 'end', values=(partido['jornada'], partido['jugador1'], partido['jugador2'], partido['hora'], partido['mesa'], ""))
 
     def generar_round_robin(self):
         if len(self.jugadores) < 2:
@@ -321,7 +344,7 @@ class LigaTenisMesa:
         # En total son 11 jornadas, cada jugador juega contra cada otro jugador exactamente 3 veces
 
         # Primero, verificar qué partidos ya se han jugado en jornadas anteriores
-        self.c.execute('''SELECT j1.nombre, j2.nombre, COUNT(*) as veces_jugado
+        self.c.execute('''SELECT j1.nombre, j2.nombre, COUNT(*) as veces_jugado, p.ganador_id, p.jornada
                          FROM partidos p
                          JOIN jugadores j1 ON p.jugador1_id = j1.id
                          JOIN jugadores j2 ON p.jugador2_id = j2.id
@@ -336,26 +359,37 @@ class LigaTenisMesa:
                 if j1 != j2:
                     enfrentamientos[j1][j2] = 0
 
-        for partido in partidos_anteriores:
-            j1, j2, count = partido
-            enfrentamientos[j1][j2] = count
-            enfrentamientos[j2][j1] = count
-
         # Seleccionar los partidos para esta jornada
         partidos_jornada = []
         jugadores_por_jugar = jugadores.copy()
 
-        while len(partidos_jornada) < (n * 3) / 2 and len(jugadores_por_jugar) > 1:
+        count_aux = 0
+        for partido in partidos_anteriores:
+            j1, j2, count, jg, jornada = partido
+            enfrentamientos[j1][j2] = count
+            enfrentamientos[j2][j1] = count
+            if not jg:
+                part_aux = {
+                    'jornada': jornada,
+                    'jugador1': j1,
+                    'jugador2': j2,
+                    'ganador': None,
+                    'reprogramado': True if jornada < self.jornada_actual else False
+                }
+                partidos_jornada.append(part_aux)
+                count_aux += 1
+
+        while len(partidos_jornada) < ((n * 3) / 2) + count_aux and len(jugadores_por_jugar) > 1:
             # Encontrar el jugador que ha jugado menos partidos en esta jornada
             jugador_actual = min(jugadores_por_jugar,
-                                 key=lambda x: sum(1 for p in partidos_jornada if x in [p['jugador1'], p['jugador2']]))
+                                 key=lambda x: sum(1 for p in partidos_jornada if x in [p['jugador1'], p['jugador2']] and not p['reprogramado']))
 
             # Encontrar oponente con quien ha jugado menos veces y que no esté ya en 3 partidos esta jornada
             posibles_oponentes = [
                 j for j in jugadores
                 if j != jugador_actual and
                    j in jugadores_por_jugar and
-                   sum(1 for p in partidos_jornada if j in [p['jugador1'], p['jugador2']]) < 3 and
+                   sum(1 for p in partidos_jornada if j in [p['jugador1'], p['jugador2']] and not p['reprogramado']) < 3 and
                    (j, jugador_actual) not in [(p['jugador1'], p['jugador2']) for p in partidos_jornada] and
                    (jugador_actual, j) not in [(p['jugador1'], p['jugador2']) for p in partidos_jornada]
             ]
@@ -370,9 +404,11 @@ class LigaTenisMesa:
 
             # Crear el partido
             partido = {
+                'jornada': self.jornada_actual,
                 'jugador1': jugador_actual,
                 'jugador2': oponente,
-                'ganador': None
+                'ganador': None,
+                'reprogramado': False
             }
             partidos_jornada.append(partido)
 
@@ -382,7 +418,7 @@ class LigaTenisMesa:
 
             # Verificar si algún jugador ya tiene 3 partidos en esta jornada
             for jugador in [jugador_actual, oponente]:
-                if sum(1 for p in partidos_jornada if jugador in [p['jugador1'], p['jugador2']]) >= 3:
+                if sum(1 for p in partidos_jornada if jugador in [p['jugador1'], p['jugador2']] and not p['reprogramado']) >= 3:
                     if jugador in jugadores_por_jugar:
                         jugadores_por_jugar.remove(jugador)
 
@@ -394,6 +430,7 @@ class LigaTenisMesa:
         slot = 0
         agenda = []
         ocupacion_jugadores = defaultdict(list)
+
         while partidos_jornada:
             hora_slot = hora_inicio + slot * dt.timedelta(minutes=30)
             mesas_disponibles = n_mesas
@@ -407,11 +444,14 @@ class LigaTenisMesa:
 
                 if not ocupado_j1 and not ocupado_j2 and mesas_disponibles > 0:
                     agenda.append({
+                        'jornada': partido['jornada'],
                         'jugador1': j1,
                         'jugador2': j2,
                         'hora': hora_slot.strftime('%H:%M'),
                         'mesa': n_mesas - mesas_disponibles + 1,
-                        'ganador': None})
+                        'ganador': None,
+                        'reprogramado': partido['reprogramado']
+                    })
                     ocupacion_jugadores[j1].append(hora_slot)
                     ocupacion_jugadores[j2].append(hora_slot)
                     partidos_jornada.remove(partido)
@@ -420,7 +460,7 @@ class LigaTenisMesa:
                 if mesas_disponibles == 0:
                     break
             slot += 1
-
+        # print(agenda)
         return agenda
 
     def agregar_jugador(self):
@@ -492,11 +532,12 @@ class LigaTenisMesa:
 
         # Actualizar en la base de datos
         self.c.execute('''UPDATE partidos SET ganador_id = 
-                        (SELECT id FROM jugadores WHERE nombre = ?)
+                        (SELECT id FROM jugadores WHERE nombre = ?),
+                        reprogramado = False
                         WHERE jornada = ? AND 
                         jugador1_id = (SELECT id FROM jugadores WHERE nombre = ?) AND
                         jugador2_id = (SELECT id FROM jugadores WHERE nombre = ?)''',
-                       (ganador, self.jornada_actual, partido['jugador1'], partido['jugador2']))
+                       (ganador, partido['jornada'], partido['jugador1'], partido['jugador2']))
 
         # Actualizar estadísticas de los jugadores
         perdedor = partido['jugador2'] if ganador == partido['jugador1'] else partido['jugador1']
@@ -520,16 +561,16 @@ class LigaTenisMesa:
 
         # Actualizar visualización
         item = self.tabla_partidos.get_children()[partido_idx]
-        self.tabla_partidos.item(item, values=(partido['jugador1'], partido['jugador2'], partido['hora'], partido['mesa'], ganador))
+        self.tabla_partidos.item(item, values=(partido['jornada'], partido['jugador1'], partido['jugador2'], partido['hora'], partido['mesa'], ganador))
         self.actualizar_tabla_ranking()
 
     def exportar_partidos_a_excel(self):
-        self.c.execute(f"SELECT jornada, j1.nombre Jugador1, j2.nombre Jugador2, jg.nombre Ganador, fecha, hora, mesa "
+        self.c.execute(f"SELECT jornada, j1.nombre Jugador1, j2.nombre Jugador2, jg.nombre Ganador, fecha, hora, mesa, reprogramado "
                        f"FROM partidos "
                        f"LEFT JOIN jugadores j1 ON jugador1_id=j1.id "
                        f"LEFT JOIN jugadores j2 ON jugador2_id=j2.id "
                        f"LEFT JOIN jugadores jg ON ganador_id=jg.id "
-                       f"WHERE jornada = {self.jornada_actual}")
+                       f"WHERE jornada <= {self.jornada_actual} and partidos.ganador_id is null")
 
         names = [x[0] for x in self.c.description]
         partidos_jornada_actual = self.c.fetchall()
@@ -562,13 +603,13 @@ class LigaTenisMesa:
             partidos_encontrados = []
 
             for index, row in import_df.iterrows():
-                if len(row) >= 8 and row[2] and row[3]:  # Jugador1 y Jugador2 existen
+                if len(row) >= 9 and row[2] and row[3]:  # Jugador1 y Jugador2 existen
                     jugador1 = str(row[2]).strip()
                     jugador2 = str(row[3]).strip()
-                    ganador = str(row[4]).strip() if len(row) > 4 and row[4] else None
-                    fecha = str(row[5]).strip() if len(row) > 5 and row[5] else None
-                    hora = str(row[6]).strip() if len(row) > 6 and row[6] else None
-                    mesa = str(row[7]).strip() if len(row) > 7 and row[7] else None
+                    ganador = str(row[4]).strip() if len(row) > 4 and not pd.isna(row[4]) else None
+                    fecha = str(row[5]).strip() if len(row) > 5 and not pd.isna(row[5]) else None
+                    hora = str(row[6]).strip() if len(row) > 6 and not pd.isna(row[6]) else None
+                    mesa = str(row[7]).strip() if len(row) > 7 and not pd.isna(row[7]) else None
 
                     if jugador1 and jugador2:
                         partidos_encontrados.append({
@@ -593,6 +634,7 @@ class LigaTenisMesa:
                 jugadores_en_excel.add(partido['jugador2'])
                 if partido['ganador']:
                     jugadores_en_excel.add(partido['ganador'])
+                    print(partido['ganador'])
 
             jugadores_faltantes = jugadores_en_excel - jugadores_existentes
             if jugadores_faltantes:
@@ -612,7 +654,10 @@ class LigaTenisMesa:
                              partido['jugador2'] == partido_excel['jugador1'])):
 
                         if partido['ganador'] is not None:
-                            print(f"Ganador = {partido['ganador']}")
+                            ## print(f"Ganador = {partido['ganador']}")
+                            messagebox.showinfo("Warning",
+                                                f"Ya existe un ganador registrado para el partido {partido['jugador1']} VS {partido['jugador2']} \nGANADOR: {partido['ganador']}")
+
                             continue  # Ya tiene resultado
 
                         if partido_excel['ganador']:
@@ -623,18 +668,25 @@ class LigaTenisMesa:
 
             messagebox.showinfo("Importación completada",
                                 f"Se importaron resultados para {partidos_importados} partidos")
-            print(partidos_encontrados)
-            print(self.partidos_jornada_actual)
+            # print(partidos_encontrados)
+            # print(self.partidos_jornada_actual)
 
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo leer el archivo Excel:\n{str(e)}")
 
     def finalizar_jornada(self):
         # Verificar que todos los partidos tienen resultado
+        p_pendientes = 0
         for partido in self.partidos_jornada_actual:
-            if partido['ganador'] is None:
-                messagebox.showerror("Error", "Hay partidos sin resultado registrado")
-                return
+            try:
+                if partido['ganador'].strip() == '':
+                    p_pendientes += 1
+            except AttributeError:
+                p_pendientes += 1
+
+        if p_pendientes:
+            messagebox.showinfo("Warning",
+                                f"Hay {p_pendientes} partidos sin resultado registrado. Serán reagendados")
 
         # Marcar jornada como completada
         self.c.execute("UPDATE jornadas SET completada = 1 WHERE numero = ?", (self.jornada_actual,))
