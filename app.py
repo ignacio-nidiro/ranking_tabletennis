@@ -308,6 +308,7 @@ class LigaTenisMesa:
             llenar_partidos_jornada(partidos_existentes_jornada_actual)
         else:
             # Generar nuevos partidos para la jornada
+            llenar_partidos_jornada(partidos_wo_ganador_pasados)
             self.partidos_jornada_actual = self.generar_round_robin()
 
             # Insertar partidos en la base de datos
@@ -698,6 +699,12 @@ class LigaTenisMesa:
                     p_pendientes += 1
             except AttributeError:
                 p_pendientes += 1
+            finally:
+                self.c.execute("SELECT id from jugadores WHERE nombre = ?;", (partido['jugador1'],))
+                jugador1_id = self.c.fetchone()[0]
+                self.c.execute("SELECT id from jugadores WHERE nombre = ?;", (partido['jugador2'],))
+                jugador2_id = self.c.fetchone()[0]
+                self.c.execute("UPDATE partidos SET reprogramado = True WHERE jornada = ? AND jugador1_id = ? AND jugador2_id = ?", (partido['jornada'], jugador1_id, jugador2_id))
 
         if p_pendientes:
             messagebox.showinfo("Warning",
