@@ -351,6 +351,21 @@ class LigaTenisMesa:
                          GROUP BY j1.nombre, j2.nombre''')
         partidos_anteriores = self.c.fetchall()
 
+        partidos_anteriores = [list(partido) for partido in partidos_anteriores]
+
+        for partido in partidos_anteriores:
+            j1, j2, count, jg, jornada = partido
+            for partido2 in partidos_anteriores:
+                #print(f'PARTIDO 1: {partido}\nPARTIDO 2: {partido2}')
+                j1_2, j2_2, count_2, jg_2, jornada_2 = partido2
+                #print(f'{j1} = {j2_2} / {j2} = {j1_2} Bool: {j1 == j2_2 and j2 == j1_2}')
+                if partido == partido2:
+                    continue
+                if j1 == j2_2 and j2 == j1_2:
+                    partido[2] += count_2 # Count
+                    partidos_anteriores.remove(partido2)
+
+
         # Crear un diccionario de enfrentamientos
         enfrentamientos = {}
         for j1 in jugadores:
